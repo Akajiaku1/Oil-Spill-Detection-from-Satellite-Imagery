@@ -1,0 +1,38 @@
+// Oil Spill Detection from Sentinel-1 SAR Imagery
+
+// 1. Define Area of Interest (AOI)
+var AOI = ee.Geometry.Polygon([
+  [[4.3, 5.8], [4.3, 4.8], [6.0, 4.8], [6.0, 5.8]]
+]);
+Map.centerObject(AOI, 9);
+
+// 2. Load Sentinel-1 SAR GRD Data (VV polarization)
+var s1 = ee.ImageCollection('COPERNICUS/S1_GRD')
+  .filterBounds(AOI)
+  .filterDate('2023-01-01', '2023-01-31')
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'))
+  .select('VV');
+
+// 3. Median Composite
+var medianVV = s1.median().clip(AOI);
+
+// 4. Oil Spill Detection (Low backscatter areas)
+// Use a threshold for dark pixels indicating oil spill presence
+var threshold = -22; // dB (adjust as needed)
+var oilSpill = medianVV.lt(threshold);
+
+// 5. Visualization
+var visVV = {min: -30, max: 0};
+Map.addLayer(medianVV, visVV, 'Sentinel-1 VV');
+Map.addLayer(oilSpill.updateMask(oilSpill), {palette: ['red']}, 'Detected Oil Spill');
+
+// 6. Optional: Export result
+Export.image.toDrive({
+  image: oilSpill,
+  description: 'OilSpillDetection_Jan2023',
+  scale: 10,
+  region: AOI,
+  fileFormat: 'GeoTIFF'
+});
