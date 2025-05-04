@@ -1,0 +1,63 @@
+import ee
+import geemap
+import folium
+
+# Initialize the Earth Engine module
+ee.Initialize()
+
+# Define Area of Interest (AOI)
+aoi = ee.Geometry.Polygon([
+    [[4.3, 5.8], [4.3, 4.8], [6.0, 4.8], [6.0, 5.8]]
+])
+
+# Load Sentinel-1 GRD VV polarization
+sentinel1 = ee.ImageCollection('COPERNICUS/S1_GRD') \
+    .filterBounds(aoi) \
+    .filterDate('2023-01-01', '2023-01-31') \
+    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')) \
+    .filter(ee.Filter.eq('instrumentMode', 'IW')) \
+    .select('VV') \
+    .median() \
+    .clip(aoi)
+
+# Create training samples (oil spill and water)
+# 0 = non-spill (open water), 1 = spill (dark slick)
+oil_points = ee.FeatureCollection([
+    ee.Feature(ee.Geometry.Point([5.0, 5.2]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([5.1, 5.21]), {'class': 1}),
+    ee.Feature(ee.Geometry.Point([4.95, 5.18]), {'class': 1})
+])
+
+non_oil_points = ee.FeatureCollection([
+    ee.Feature(ee.Geometry.Point([5.4, 5.3]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([5.5, 5.32]), {'class': 0}),
+    ee.Feature(ee.Geometry.Point([5.6, 5.35]), {'class': 0})
+])
+
+# Merge training data
+training_points = oil_points.merge(non_oil_points)
+
+# Sample the Sentinel-1 image at the training point locations
+training = sentinel1.sampleRegions(
+    collection=training_points,
+    properties=['class'],
+    scale=10
+)
+
+# Train the Random Forest classifier
+classifier = ee.Classifier.smileRandomForest(numberOfTrees=50).train(
+    features=training,
+    classProperty='class',
+    inputProperties=['VV']
+)
+
+# Classify the entire image
+classified = sentinel1.classify(classifier)
+
+# Visualize
+Map = geemap.Map(center=[5.3, 5.0], zoom=9)
+Map.addLayer(sentinel1, {'min': -30, 'max': 0}, 'Sentinel-1 VV')
+Map.addLayer(classified.eq(1).selfMask(), {'palette': 'red'}, 'Oil Spill (RF)')
+Map.addLayer(classified.eq(0).selfMask(), {'palette': 'blue'}, 'Non-Spill (RF)')
+Map.addLayer(training_points, {}, 'Training Points')
+Map
