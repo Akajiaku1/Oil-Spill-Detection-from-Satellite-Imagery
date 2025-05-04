@@ -1,0 +1,45 @@
+import ee
+import geemap
+import folium
+
+# Initialize Earth Engine
+ee.Initialize()
+
+# Define Area of Interest (AOI)
+aoi = ee.Geometry.Polygon([
+    [[4.3, 5.8], [4.3, 4.8], [6.0, 4.8], [6.0, 5.8]]
+])
+
+# Load Sentinel-1 Image Collection (VV polarization)
+s1_vv = ee.ImageCollection('COPERNICUS/S1_GRD') \
+    .filterBounds(aoi) \
+    .filterDate('2023-01-01', '2023-01-31') \
+    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')) \
+    .filter(ee.Filter.eq('instrumentMode', 'IW')) \
+    .filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING')) \
+    .select('VV')
+
+# Median Composite
+vv_median = s1_vv.median().clip(aoi)
+
+# Oil Spill Detection via Thresholding (dark pixels < -22 dB)
+threshold = -22
+oil_spill = vv_median.lt(threshold)
+
+# Visualize
+Map = geemap.Map(center=[5.3, 5.0], zoom=9)
+Map.addLayer(vv_median, {'min': -30, 'max': 0}, 'Sentinel-1 VV')
+Map.addLayer(oil_spill.updateMask(oil_spill), {'palette': 'red'}, 'Oil Spill Detection')
+Map
+
+# Optional: Export image to Google Drive
+export_task = ee.batch.Export.image.toDrive(
+    image=oil_spill,
+    description='OilSpillDetection_Jan2023',
+    folder='EarthEngine',
+    fileNamePrefix='oil_spill_jan2023',
+    region=aoi,
+    scale=10,
+    fileFormat='GeoTIFF'
+)
+export_task.start()
